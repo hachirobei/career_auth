@@ -1,19 +1,26 @@
 package controllers
 
 import (
+    "fmt"
     "net/http"
-    "time"
     "os"
+    "time"
 
-    "career.com/auth/database"
-    "career.com/auth/models"
+    "career.com/auth/internal/database"
+    "career.com/auth/internal/models"
 
     "github.com/gin-gonic/gin"
     "github.com/golang-jwt/jwt/v4"
     "golang.org/x/crypto/bcrypt"
 )
 
-var secretKey = os.Getenv("SECRET_KEY"); // should be in an environment variable
+var secretKey = os.Getenv("SECRET_KEY")
+
+type CustomClaims struct {
+    Username string `json:"username"`
+    Role     models.Role `json:"role"`
+    jwt.RegisteredClaims
+}
 
 func HashPassword(password string) (string, error) {
     bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
@@ -26,18 +33,41 @@ func CheckPasswordHash(password, hash string) bool {
 }
 
 func GenerateJWT(username string, role models.Role) (string, error) {
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-        "username": username,
-        "role":     role,
-        "exp":      time.Now().Add(time.Hour * 24).Unix(),
-    })
+    claims := CustomClaims{
+        Username: username,
+        Role:     role,
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
+        },
+    }
 
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
     tokenString, err := token.SignedString([]byte(secretKey))
     if err != nil {
         return "", err
     }
 
     return tokenString, nil
+}
+
+func getUserByUsername(username string) (models.User, error) {
+    db := database.ConnectToDB()
+    var user models.User
+    result := db.Where("username = ?", username).First(&user)
+    if result.Error != nil {
+        return models.User{}, result.Error
+    }
+    return user, nil
+}
+
+func saveRefreshToken(userID int, refreshToken string) error {
+    // Implement logic to save the refresh token to the database
+    return nil
+}
+
+func GenerateRefreshToken(username string) (string, error) {
+    // Implement logic to generate a refresh token
+    return "refresh-token", nil
 }
 
 func SignUp(c *gin.Context) {
@@ -69,17 +99,16 @@ func Login(c *gin.Context) {
         Username string `json:"username"`
         Password string `json:"password"`
     }
-    var user models.User
 
     if err := c.ShouldBindJSON(&loginInfo); err != nil {
         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
         return
     }
 
-    db := database.ConnectToDB() // Ensure this is your function to connect to the database
-    result := db.Where("username = ?", loginInfo.Username).First(&user)
-    if result.Error != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username or password"})
+    user, err := getUserByUsername(loginInfo.Username)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username or
+        password"})
         return
     }
 
@@ -87,30 +116,51 @@ func Login(c *gin.Context) {
         c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username or password"})
         return
     }
-
+        
     accessToken, err := GenerateJWT(user.Username, user.Role)
     if err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generating access token"})
         return
     }
-
+        
     refreshToken, err := GenerateRefreshToken(user.Username)
     if err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generating refresh token"})
         return
     }
-
-    // Save the refresh token in user_token table
-    userToken := models.UserToken{
-        UserID:    user.ID,
-        Token:     refreshToken,
-        ExpiresAt: time.Now().Add(72 * time.Hour), // Set expiration for the refresh token
-    }
     
-    db.Save(&userToken)
-
+    err = saveRefreshToken(user.ID, refreshToken)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Error saving refresh token"})
+        return
+    }
+        
     c.JSON(http.StatusOK, gin.H{
         "accessToken":  accessToken,
         "refreshToken": refreshToken,
     })
+    
+}
+
+
+// TokenValidationHandler checks if the provided JWT token is valid
+func TokenValidationHandler(c *gin.Context) {
+    tokenString := c.GetHeader("Authorization")if tokenString == "" {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Token not provided"})
+        return
+    }
+
+    token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+        if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+            return nil, fmt.Errorf("unexpected signing method")
+        }
+        return []byte(secretKey), nil
+    })
+
+    if err != nil || !token.Valid {
+        c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{"success": true, "message": "Token is valid"})
 }

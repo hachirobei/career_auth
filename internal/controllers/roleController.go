@@ -2,8 +2,8 @@ package controllers
 
 import (
     "net/http"
-    "career.com/auth/database"
-    "career.com/auth/models"  
+    "career.com/auth/internal/database"
+    "career.com/auth/internal/models"  
 	
     "github.com/gin-gonic/gin"
 )

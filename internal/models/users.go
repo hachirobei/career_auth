@@ -12,7 +12,6 @@ type Users struct {
     Phone       string      `json:"phone" gorm:"type:text;not null"`
     Username    string      `json:"username" gorm:"type:text;not null;unique"`
     Password    string      `json:"password" gorm:"type:text;not null"`
-    RoleId      int         `json:"role" gorm:"type:int;not null"`
     Status      int         `json:"status" gorm:"type:int;not null;default:1"`
     Base
 }

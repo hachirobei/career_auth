@@ -1,4 +1,4 @@
-package utils
+package helpers
 
 // ApiResponse structure for standardizing API responses
 type ApiResponse struct {
